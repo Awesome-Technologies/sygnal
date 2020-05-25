@@ -64,17 +64,11 @@ class Counts:
 class Notification:
     def __init__(self, notif):
         optional_attrs = [
-            "room_name",
-            "room_alias",
             "prio",
-            "membership",
-            "sender_display_name",
-            "content",
-            "event_id",
-            "room_id",
-            "user_is_target",
             "type",
             "sender",
+            "patient_id",
+            "servicerequest_id",
         ]
         for a in optional_attrs:
             if a in notif:

@@ -156,12 +156,6 @@ class V1NotifyHandler(Resource):
                 root_span.log_kv({logs.EVENT: "error", "error.object": e})
                 return str(e).encode()
 
-            if notif.event_id is not None:
-                root_span.set_tag("event_id", notif.event_id)
-
-            # track whether the notification was passed with content
-            root_span.set_tag("has_content", notif.content is not None)
-
             NOTIFS_RECEIVED_COUNTER.inc()
 
             if len(notif.devices) == 0:

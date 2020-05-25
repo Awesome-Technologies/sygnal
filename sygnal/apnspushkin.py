@@ -170,10 +170,8 @@ class ApnsPushkin(Pushkin):
         log.info(f"Sending as APNs-ID {notif_id}")
         span.set_tag("apns_id", notif_id)
 
-        device_token = base64.b64decode(device.pushkey).hex()
-
         request = NotificationRequest(
-            device_token=device_token,
+            device_token=device.pushkey,
             message=shaved_payload,
             priority=prio,
             notification_id=notif_id,
@@ -225,15 +223,12 @@ class ApnsPushkin(Pushkin):
             "apns_dispatch", tags=span_tags, child_of=context.opentracing_span
         ) as span_parent:
 
-            if n.event_id and not n.type:
-                payload = self._get_payload_event_id_only(n)
-            else:
-                payload = self._get_payload_full(n, log)
+            payload = self._get_payload_full(n, log)
 
             if payload is None:
                 # Nothing to do
                 span_parent.log_kv({logs.EVENT: "apns_no_payload"})
-                return
+                return []
             prio = 10
             if n.prio == "low":
                 prio = 5
@@ -278,29 +273,6 @@ class ApnsPushkin(Pushkin):
                             retry_delay, twisted_reactor=self.sygnal.reactor
                         )
 
-    def _get_payload_event_id_only(self, n):
-        """
-        Constructs a payload for a notification where we know only the event ID.
-        Args:
-            n: The notification to construct a payload for.
-
-        Returns:
-            The APNs payload as a nested dicts.
-        """
-        payload = {}
-
-        if n.room_id:
-            payload["room_id"] = n.room_id
-        if n.event_id:
-            payload["event_id"] = n.event_id
-
-        if n.counts.unread is not None:
-            payload["unread_count"] = n.counts.unread
-        if n.counts.missed_calls is not None:
-            payload["missed_calls"] = n.counts.missed_calls
-
-        return payload
-
     def _get_payload_full(self, n, log):
         """
         Constructs a payload for a notification.
@@ -311,133 +283,37 @@ class ApnsPushkin(Pushkin):
         Returns:
             The APNs payload as nested dicts.
         """
-        from_display = n.sender
-        if n.sender_display_name is not None:
-            from_display = n.sender_display_name
-        from_display = from_display[0 : self.MAX_FIELD_LENGTH]
 
         loc_key = None
         loc_args = None
-        if n.type == "m.room.message" or n.type == "m.room.encrypted":
-            room_display = None
-            if n.room_name:
-                room_display = n.room_name[0 : self.MAX_FIELD_LENGTH]
-            elif n.room_alias:
-                room_display = n.room_alias[0 : self.MAX_FIELD_LENGTH]
 
-            content_display = None
-            action_display = None
-            is_image = False
-            if n.content and "msgtype" in n.content and "body" in n.content:
-                if "body" in n.content:
-                    if n.content["msgtype"] == "m.text":
-                        content_display = n.content["body"]
-                    elif n.content["msgtype"] == "m.emote":
-                        action_display = n.content["body"]
-                    else:
-                        # fallback: 'body' should always be user-visible text
-                        # in an m.room.message
-                        content_display = n.content["body"]
-                if n.content["msgtype"] == "m.image":
-                    is_image = True
-
-            if room_display:
-                if is_image:
-                    loc_key = "IMAGE_FROM_USER_IN_ROOM"
-                    loc_args = [from_display, content_display, room_display]
-                elif content_display:
-                    loc_key = "MSG_FROM_USER_IN_ROOM_WITH_CONTENT"
-                    loc_args = [from_display, room_display, content_display]
-                elif action_display:
-                    loc_key = "ACTION_FROM_USER_IN_ROOM"
-                    loc_args = [room_display, from_display, action_display]
-                else:
-                    loc_key = "MSG_FROM_USER_IN_ROOM"
-                    loc_args = [from_display, room_display]
-            else:
-                if is_image:
-                    loc_key = "IMAGE_FROM_USER"
-                    loc_args = [from_display, content_display]
-                elif content_display:
-                    loc_key = "MSG_FROM_USER_WITH_CONTENT"
-                    loc_args = [from_display, content_display]
-                elif action_display:
-                    loc_key = "ACTION_FROM_USER"
-                    loc_args = [from_display, action_display]
-                else:
-                    loc_key = "MSG_FROM_USER"
-                    loc_args = [from_display]
-
-        elif n.type == "m.call.invite":
-            is_video_call = False
-
-            # This detection works only for hs that uses WebRTC for calls
-            if n.content and "offer" in n.content and "sdp" in n.content["offer"]:
-                sdp = n.content["offer"]["sdp"]
-                if "m=video" in sdp:
-                    is_video_call = True
-
-            if is_video_call:
-                loc_key = "VIDEO_CALL_FROM_USER"
-            else:
-                loc_key = "VOICE_CALL_FROM_USER"
-
-            loc_args = [from_display]
-        elif n.type == "m.room.member":
-            if n.user_is_target:
-                if n.membership == "invite":
-                    if n.room_name:
-                        loc_key = "USER_INVITE_TO_NAMED_ROOM"
-                        loc_args = [
-                            from_display,
-                            n.room_name[0 : self.MAX_FIELD_LENGTH],
-                        ]
-                    elif n.room_alias:
-                        loc_key = "USER_INVITE_TO_NAMED_ROOM"
-                        loc_args = [
-                            from_display,
-                            n.room_alias[0 : self.MAX_FIELD_LENGTH],
-                        ]
-                    else:
-                        loc_key = "USER_INVITE_TO_CHAT"
-                        loc_args = [from_display]
-        elif n.type:
-            # A type of message was received that we don't know about
-            # but it was important enough for a push to have got to us
-            loc_key = "MSG_FROM_USER"
-            loc_args = [from_display]
+        if n.type == "create":
+            loc_key = "CASE_CREATED"
+        if n.type == "update":
+            loc_key = "CASE_UPDATED"
 
         aps = {}
         if loc_key:
             aps["alert"] = {"loc-key": loc_key}
+            aps["mutable-content"] = 1
 
         if loc_args:
             aps["alert"]["loc-args"] = loc_args
 
-        badge = None
-        if n.counts.unread is not None:
-            badge = n.counts.unread
-        if n.counts.missed_calls is not None:
-            if badge is None:
-                badge = 0
-            badge += n.counts.missed_calls
-
-        if badge is not None:
-            aps["badge"] = badge
-
-        if loc_key:
-            aps["mutable-content"] = 1
-
-        if loc_key is None and badge is None:
+        if loc_key is None:
             log.info("Nothing to do for alert of type %s", n.type)
             return None
 
         payload = {}
 
-        if loc_key and n.room_id:
-            payload["room_id"] = n.room_id
-        if loc_key and n.event_id:
-            payload["event_id"] = n.event_id
+        if loc_key and n.patient_id:
+            payload["patientID"] = n.patient_id
+        if loc_key and n.servicerequest_id:
+            payload["serviceRequestID"] = n.servicerequest_id
+        if loc_key and n.sender:
+            payload["sender"] = n.sender
+
+        payload["sound"] = "default"
 
         payload["aps"] = aps
 
