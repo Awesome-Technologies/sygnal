@@ -66,9 +66,10 @@ class Notification:
         optional_attrs = [
             "prio",
             "type",
+            "resource",
             "sender",
             "patient_id",
-            "servicerequest_id",
+            "request_id",
         ]
         for a in optional_attrs:
             if a in notif:

@@ -287,12 +287,29 @@ class ApnsPushkin(Pushkin):
         loc_key = None
         loc_args = None
 
-        if n.type == "create":
-            loc_key = "CASE_CREATED"
-        if n.type == "update":
-            loc_key = "CASE_UPDATED"
-
         aps = {}
+        payload = {}
+
+        if n.resource and n.resource == "ServiceRequest":
+            if n.type == "create":
+                loc_key = "CASE_CREATED"
+            if n.type == "update":
+                loc_key = "CASE_UPDATED"
+            if loc_key and n.request:
+                payload["serviceRequest"] = n.request
+
+        if n.resource and n.resource == "CommunicationRequest":
+            if n.type == "create":
+                loc_key = "CALL_CREATED"
+            if n.type == "update":
+                loc_key = "CALL_UPDATED"
+            if loc_key and n.request:
+                payload["communicationRequest"] = n.request
+
+        if loc_key is None:
+            log.info("Nothing to do for alert of type %s", n.type)
+            return None
+
         if loc_key:
             aps["alert"] = {"loc-key": loc_key}
             aps["mutable-content"] = 1
@@ -300,16 +317,8 @@ class ApnsPushkin(Pushkin):
         if loc_args:
             aps["alert"]["loc-args"] = loc_args
 
-        if loc_key is None:
-            log.info("Nothing to do for alert of type %s", n.type)
-            return None
-
-        payload = {}
-
-        if loc_key and n.patient_id:
-            payload["patientID"] = n.patient_id
-        if loc_key and n.servicerequest_id:
-            payload["serviceRequestID"] = n.servicerequest_id
+        if loc_key and n.patient:
+            payload["patient"] = n.patient
         if loc_key and n.sender:
             payload["sender"] = n.sender
 
