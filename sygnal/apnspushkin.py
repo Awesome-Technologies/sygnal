@@ -351,18 +351,19 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
         loc_args = None
 
         payload = {}
+        payload.setdefault("aps", {})
 
         if n.request and n.request.startswith('ServiceRequest'):
             if n.type == "create":
                 loc_key = "CASE_CREATED"
             if loc_key and n.request:
-                payload["triggeredBy"] = n.request
+                payload["aps"]["triggeredBy"] = n.request
 
         if n.request and n.request.startswith('Communication'):
             if n.type == "create" or n.type == "update":
                 loc_key = "CASE_UPDATED"
             if loc_key and n.request:
-                payload["triggeredBy"] = n.request
+                payload["aps"]["triggeredBy"] = n.request
 
         if n.request and n.request.startswith('CommunicationRequest'):
             if n.type == "create":
@@ -370,22 +371,23 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
             if n.type == "update":
                 loc_key = "CALL_UPDATED"
             if loc_key and n.request:
-                payload["triggeredBy"] = n.request
+                payload["aps"]["triggeredBy"] = n.request
 
         if loc_key is None:
             log.info("Nothing to do for alert of type %s", n.type)
             return None
 
         if loc_key and n.patient:
-            payload["patient"] = n.patient
+            payload["aps"]["patient"] = n.patient
         if loc_key and n.sender:
-            payload["sender"] = n.sender
+            payload["aps"]["sender"] = n.sender
 
+        payload["aps"]["mutable-content"] = 1
+        payload["aps"]["sound"] = "default"
 
         if n.type and device.data:
             payload = copy.deepcopy(device.data.get("default_payload", {}))
 
-        payload.setdefault("aps", {})
 
         if loc_key:
             payload["aps"].setdefault("alert", {})["loc-key"] = loc_key
@@ -398,6 +400,8 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
             payload["room_id"] = n.room_id
         if loc_key and n.event_id:
             payload["event_id"] = n.event_id
+
+        print(payload)
 
         return payload
 
