@@ -290,21 +290,25 @@ class ApnsPushkin(Pushkin):
         aps = {}
         payload = {}
 
-        if n.resource and n.resource == "ServiceRequest":
+        if n.request and n.request.startswith('ServiceRequest'):
             if n.type == "create":
                 loc_key = "CASE_CREATED"
-            if n.type == "update":
+            if loc_key and n.request:
+                payload["triggeredBy"] = n.request
+
+        if n.request and n.request.startswith('Communication'):
+            if n.type == "create" or n.type == "update":
                 loc_key = "CASE_UPDATED"
             if loc_key and n.request:
-                payload["serviceRequest"] = n.request
+                payload["triggeredBy"] = n.request
 
-        if n.resource and n.resource == "CommunicationRequest":
+        if n.request and n.request.startswith('CommunicationRequest'):
             if n.type == "create":
                 loc_key = "CALL_CREATED"
             if n.type == "update":
                 loc_key = "CALL_UPDATED"
             if loc_key and n.request:
-                payload["communicationRequest"] = n.request
+                payload["triggeredBy"] = n.request
 
         if loc_key is None:
             log.info("Nothing to do for alert of type %s", n.type)
