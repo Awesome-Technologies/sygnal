@@ -33,7 +33,7 @@ setup(
     name="matrix-sygnal",
     packages=find_packages(exclude=["tests", "tests.*"]),
     description="Reference Push Gateway for Matrix Notifications",
-    use_scm_version=True,
+    use_scm_version=False,
     setup_requires=["setuptools_scm"],
     install_requires=[
         "Twisted>=19.2.1",
