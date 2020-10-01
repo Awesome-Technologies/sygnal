@@ -14,8 +14,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import typing
+from typing import Any, Dict, List, Optional
 
-from .exceptions import InvalidNotificationException
+from prometheus_client import Counter
+
+from .exceptions import InvalidNotificationException, NotificationDispatchException
+
+if typing.TYPE_CHECKING:
+    from .sygnal import Sygnal
 
 
 class Tweaks:
@@ -63,18 +70,20 @@ class Counts:
 
 class Notification:
     def __init__(self, notif):
-        optional_attrs = [
-            "prio",
-            "type",
-            "sender",
-            "patient",
-            "request",
-        ]
-        for a in optional_attrs:
-            if a in notif:
-                self.__dict__[a] = notif[a]
-            else:
-                self.__dict__[a] = None
+        # optional attributes
+        self.room_name: Optional[str] = notif.get("room_name")
+        self.room_alias: Optional[str] = notif.get("room_alias")
+        self.prio: Optional[str] = notif.get("prio")
+        self.membership: Optional[str] = notif.get("membership")
+        self.sender_display_name: Optional[str] = notif.get("sender_display_name")
+        self.content: Optional[Dict[str, Any]] = notif.get("content")
+        self.event_id: Optional[str] = notif.get("event_id")
+        self.room_id: Optional[str] = notif.get("room_id")
+        self.user_is_target: Optional[bool] = notif.get("user_is_target")
+        self.type: Optional[str] = notif.get("type")
+        self.sender: Optional[str] = notif.get("sender")
+        self.patient: Optional[str] = notif.get("patient")
+        self.request: Optional[str] = notif.get("request")
 
         if "devices" not in notif or not isinstance(notif["devices"], list):
             raise InvalidNotificationException("Expected list in 'devices' key")
@@ -88,17 +97,19 @@ class Notification:
 
 
 class Pushkin(object):
-    def __init__(self, name, sygnal, config):
+    def __init__(self, name: str, sygnal: "Sygnal", config: Dict[str, Any]):
         self.name = name
         self.cfg = config
         self.sygnal = sygnal
 
-    def get_config(self, key, default=None):
+    def get_config(self, key: str, default=None):
         if key not in self.cfg:
             return default
         return self.cfg[key]
 
-    async def dispatch_notification(self, n, device, context):
+    async def dispatch_notification(
+        self, n: Notification, device: Device, context: "NotificationContext"
+    ) -> List[str]:
         """
         Args:
             n: The notification to dispatch via this pushkin
@@ -111,7 +122,7 @@ class Pushkin(object):
         pass
 
     @classmethod
-    async def create(cls, name, sygnal, config):
+    async def create(cls, name: str, sygnal: "Sygnal", config: Dict[str, Any]):
         """
         Override this if your pushkin needs to call async code in order to
         be constructed. Otherwise, it defaults to just invoking the Python-standard
@@ -121,6 +132,58 @@ class Pushkin(object):
             an instance of this Pushkin
         """
         return cls(name, sygnal, config)
+
+
+class ConcurrencyLimitedPushkin(Pushkin):
+    """
+    A subclass of Pushkin that limits the number of in-flight requests at any
+    one time, so as to prevent one Pushkin pulling the whole show down.
+    """
+
+    # Maximum in-flight, concurrent notification dispatches that we apply by default
+    # We start turning away requests after this limit is reached.
+    DEFAULT_CONCURRENCY_LIMIT = 512
+
+    UNDERSTOOD_CONFIG_FIELDS = {"inflight_request_limit"}
+
+    RATELIMITING_DROPPED_REQUESTS = Counter(
+        "sygnal_inflight_request_limit_drop",
+        "Number of notifications dropped because the number of inflight requests"
+        " exceeded the configured inflight_request_limit.",
+        labelnames=["pushkin"],
+    )
+
+    def __init__(self, name: str, sygnal: "Sygnal", config: Dict[str, Any]):
+        super(ConcurrencyLimitedPushkin, self).__init__(name, sygnal, config)
+        self._concurrent_limit = config.get(
+            "inflight_request_limit",
+            ConcurrencyLimitedPushkin.DEFAULT_CONCURRENCY_LIMIT,
+        )
+        self._concurrent_now = 0
+
+    async def dispatch_notification(
+        self, n: Notification, device: Device, context: "NotificationContext"
+    ) -> List[str]:
+        if self._concurrent_now >= self._concurrent_limit:
+            ConcurrencyLimitedPushkin.RATELIMITING_DROPPED_REQUESTS.labels(
+                pushkin=self.name
+            ).inc()
+            raise NotificationDispatchException(
+                "Too many in-flight requests for this pushkin. "
+                "(Something is wrong and Sygnal is struggling to keep up!)"
+            )
+
+        self._concurrent_now += 1
+        try:
+            return await self._dispatch_notification_unlimited(n, device, context)
+        finally:
+            self._concurrent_now -= 1
+
+    async def _dispatch_notification_unlimited(
+        self, n: Notification, device: Device, context: "NotificationContext"
+    ) -> List[str]:
+        # to be overridden by Pushkins!
+        raise NotImplementedError
 
 
 class NotificationContext(object):

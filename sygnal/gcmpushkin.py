@@ -22,8 +22,9 @@ from json import JSONDecodeError
 
 from opentracing import logs, tags
 from prometheus_client import Counter, Gauge, Histogram
+from twisted.enterprise.adbapi import ConnectionPool
 from twisted.internet.defer import DeferredSemaphore
-from twisted.web.client import Agent, FileBodyProducer, HTTPConnectionPool, readBody
+from twisted.web.client import FileBodyProducer, HTTPConnectionPool, readBody
 from twisted.web.http_headers import Headers
 
 from sygnal.exceptions import (
@@ -31,10 +32,11 @@ from sygnal.exceptions import (
     TemporaryNotificationDispatchException,
 )
 from sygnal.helper.context_factory import ClientTLSOptionsFactory
+from sygnal.helper.proxy.proxyagent_twisted import ProxyAgent
 from sygnal.utils import NotificationLoggerAdapter, twisted_sleep
 
 from .exceptions import PushkinSetupException
-from .notifications import Pushkin
+from .notifications import ConcurrencyLimitedPushkin
 
 QUEUE_TIME_HISTOGRAM = Histogram(
     "sygnal_gcm_queue_time", "Time taken waiting for a connection to GCM"
@@ -86,12 +88,16 @@ BAD_MESSAGE_FAILURE_CODES = ["MessageTooBig", "InvalidDataKey", "InvalidTtl"]
 DEFAULT_MAX_CONNECTIONS = 20
 
 
-class GcmPushkin(Pushkin):
+class GcmPushkin(ConcurrencyLimitedPushkin):
     """
     Pushkin that relays notifications to Google/Firebase Cloud Messaging.
     """
 
-    UNDERSTOOD_CONFIG_FIELDS = {"type", "api_key"}
+    UNDERSTOOD_CONFIG_FIELDS = {
+        "type",
+        "api_key",
+        "fcm_options",
+    } | ConcurrencyLimitedPushkin.UNDERSTOOD_CONFIG_FIELDS
 
     def __init__(self, name, sygnal, config, canonical_reg_id_store):
         super(GcmPushkin, self).__init__(name, sygnal, config)
@@ -112,10 +118,14 @@ class GcmPushkin(Pushkin):
 
         tls_client_options_factory = ClientTLSOptionsFactory()
 
-        self.http_agent = Agent(
+        # use the Sygnal global proxy configuration
+        proxy_url = sygnal.config.get("proxy")
+
+        self.http_agent = ProxyAgent(
             reactor=sygnal.reactor,
             pool=self.http_pool,
             contextFactory=tls_client_options_factory,
+            proxy_url_str=proxy_url,
         )
 
         self.db = sygnal.database
@@ -124,6 +134,15 @@ class GcmPushkin(Pushkin):
         self.api_key = self.get_config("api_key")
         if not self.api_key:
             raise PushkinSetupException("No API key set in config")
+
+        # Use the fcm_options config dictionary as a foundation for the body;
+        # this lets the Sygnal admin choose custom FCM options
+        # (e.g. content_available).
+        self.base_request_body: dict = self.get_config("fcm_options", {})
+        if not isinstance(self.base_request_body, dict):
+            raise PushkinSetupException(
+                "Config field fcm_options, if set, must be a dictionary of options"
+            )
 
     @classmethod
     async def create(cls, name, sygnal, config):
@@ -292,7 +311,7 @@ class GcmPushkin(Pushkin):
                 f"Unknown GCM response code {response.code}"
             )
 
-    async def dispatch_notification(self, n, device, context):
+    async def _dispatch_notification_unlimited(self, n, device, context):
         log = NotificationLoggerAdapter(logger, {"request_id": context.request_id})
 
         pushkeys = [
@@ -323,7 +342,7 @@ class GcmPushkin(Pushkin):
 
             inverse_reg_id_mappings = {v: k for (k, v) in reg_id_mappings.items()}
 
-            data = GcmPushkin._build_data(n)
+            data = GcmPushkin._build_data(n, device)
             headers = {
                 b"User-Agent": ["sygnal"],
                 b"Content-Type": ["application/json"],
@@ -339,7 +358,9 @@ class GcmPushkin(Pushkin):
             # TODO: Implement collapse_key to queue only one message per room.
             failed = []
 
-            body = {"data": data, "priority": "normal" if n.prio == "low" else "high"}
+            body = self.base_request_body.copy()
+            body["data"] = data
+            body["priority"] = "normal" if n.prio == "low" else "high"
 
             for retry_number in range(0, MAX_TRIES):
                 mapped_pushkeys = [reg_id_mappings[pk] for pk in pushkeys]
@@ -393,16 +414,22 @@ class GcmPushkin(Pushkin):
             return failed
 
     @staticmethod
-    def _build_data(n):
+    def _build_data(n, device):
         """
         Build the payload data to be sent.
         Args:
             n: Notification to build the payload for.
+            device (Device): Device information to which the constructed payload
+            will be sent.
 
         Returns:
             JSON-compatible dict
         """
         data = {}
+
+        if device.data:
+            data.update(device.data.get("default_payload", {}))
+
         for attr in [
             "event_id",
             "type",
@@ -441,7 +468,8 @@ class CanonicalRegIdStore(object):
         """
 
     def __init__(self):
-        self.db = None
+        self.db: ConnectionPool = None
+        self.engine = None
 
     async def setup(self, db, engine):
         """

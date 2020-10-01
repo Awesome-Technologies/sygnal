@@ -1,3 +1,95 @@
+Sygnal 0.8.2 (2020-08-06)
+=========================
+
+Features
+--------
+
+- Add the ability to configure custom FCM options, which is necessary for using iOS with Firebase. ([\#145](https://github.com/matrix-org/sygnal/issues/145))
+- Add a Prometheus metric (`sygnal_inflight_request_limit_drop`) that shows the number of notifications dropped due to exceeding the in-flight concurrent request limit. ([\#146](https://github.com/matrix-org/sygnal/issues/146))
+
+
+Sygnal 0.8.1 (2020-07-28)
+=========================
+
+Updates to the Docker image
+---------------------------
+
+- Include GeoTrust Global CA's certificate in the Docker image as it is needed for APNs (and was removed by Debian). ([\#141](https://github.com/matrix-org/sygnal/issues/141))
+
+
+Sygnal 0.7.2 (2020-07-28)
+=========================
+
+Updates to the Docker image
+---------------------------
+
+- Include GeoTrust Global CA's certificate in the Docker image as it is needed for APNs (and was removed by Debian). ([\#141](https://github.com/matrix-org/sygnal/issues/141))
+
+
+Sygnal 0.8.0 (2020-07-27)
+=========================
+
+Features
+--------
+
+- Add support for HTTP CONNECT proxies on outbound FCM and APNs traffic, with optional support for HTTP Proxy Basic Authentication. ([\#130](https://github.com/matrix-org/sygnal/issues/130))
+- Add support for per-pushkin in-flight request limiting. ([\#132](https://github.com/matrix-org/sygnal/issues/132))
+
+
+Internal Changes
+----------------
+
+- Fixed MyPy errors so it can be enabled in CI and gradually be increased in coverage. ([\#131](https://github.com/matrix-org/sygnal/issues/131))
+- Attempt the same number of retries for both GCM and APNS. ([\#133](https://github.com/matrix-org/sygnal/issues/133))
+- Use tox for tests and linting. ([\#134](https://github.com/matrix-org/sygnal/issues/134))
+- Include libpq5 in the docker image. ([\#135](https://github.com/matrix-org/sygnal/issues/135))
+
+
+Sygnal 0.7.1 (2020-07-27)
+=========================
+
+Security advisory
+-----------------
+
+This version of Sygnal updates the minimum version of the `aioapns` dependency
+to version `1.10` which addresses a TLS hostname validation bug in `aioapns`.
+
+Sygnal was vulnerable to a man-in-the-middle attack on APNs data if someone
+could spoof your DNS or otherwise redirect your APNs traffic.
+
+This issue affects any Sygnal deployments that make use of APNs certificate
+authentication (i.e. those with `certfile: something.pem` in the configuration).
+
+Administrators are encouraged to upgrade.
+
+
+Bugfixes
+--------
+
+- Update minimum version of `aioapns` dependency to 1.10, which has security fixes. ([\#139](https://github.com/matrix-org/sygnal/issues/139))
+
+
+Sygnal 0.7.0 (2020-06-24)
+=========================
+
+Features
+--------
+
+- Use `default_payload` from the device data for both APNS and GCM payloads. ([\#127](https://github.com/matrix-org/sygnal/issues/127))
+
+
+Improved Documentation
+----------------------
+
+- Note information about Docker files in release instructions. ([\#126](https://github.com/matrix-org/sygnal/issues/126))
+
+
+Internal Changes
+----------------
+
+- Improve logging if a pushkin cannot be created. ([\#125](https://github.com/matrix-org/sygnal/issues/125))
+
+
 Sygnal 0.6.0 (2020-05-12)
 =========================
 

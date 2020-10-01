@@ -16,9 +16,11 @@
 # limitations under the License.
 import asyncio
 import base64
-from datetime import timezone
+import copy
 import logging
 import os
+from datetime import timezone
+from typing import Dict
 from uuid import uuid4
 
 import aioapns
@@ -26,17 +28,18 @@ from aioapns import APNs, NotificationRequest
 from cryptography.hazmat.backends import default_backend
 from cryptography.x509 import load_pem_x509_certificate
 from opentracing import logs, tags
-from prometheus_client import Histogram, Counter, Gauge
+from prometheus_client import Counter, Gauge, Histogram
 from twisted.internet.defer import Deferred
 
 from sygnal import apnstruncate
 from sygnal.exceptions import (
+    NotificationDispatchException,
     PushkinSetupException,
     TemporaryNotificationDispatchException,
-    NotificationDispatchException,
 )
-from sygnal.notifications import Pushkin
-from sygnal.utils import twisted_sleep, NotificationLoggerAdapter
+from sygnal.helper.proxy.proxy_asyncio import ProxyingEventLoopWrapper
+from sygnal.notifications import ConcurrencyLimitedPushkin
+from sygnal.utils import NotificationLoggerAdapter, twisted_sleep
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +64,7 @@ CERTIFICATE_EXPIRATION_GAUGE = Gauge(
 )
 
 
-class ApnsPushkin(Pushkin):
+class ApnsPushkin(ConcurrencyLimitedPushkin):
     """
     Relays notifications to the Apple Push Notification Service.
     """
@@ -84,7 +87,7 @@ class ApnsPushkin(Pushkin):
         "key_id",
         "keyfile",
         "topic",
-    }
+    } | ConcurrencyLimitedPushkin.UNDERSTOOD_CONFIG_FIELDS
 
     def __init__(self, name, sygnal, config):
         super().__init__(name, sygnal, config)
@@ -129,17 +132,38 @@ class ApnsPushkin(Pushkin):
             if not self.get_config("topic"):
                 raise PushkinSetupException("You must supply topic.")
 
+        # use the Sygnal global proxy configuration
+        proxy_url_str = sygnal.config.get("proxy")
+
+        loop = asyncio.get_event_loop()
+        if proxy_url_str:
+            # this overrides the create_connection method to use a HTTP proxy
+            loop = ProxyingEventLoopWrapper(loop, proxy_url_str)  # type: ignore
+
         if certfile is not None:
-            self.apns_client = APNs(client_cert=certfile, use_sandbox=self.use_sandbox)
+            # max_connection_attempts is actually the maximum number of
+            # additional connection attempts, so =0 means try once only
+            # (we will retry at a higher level so not worth doing more here)
+            self.apns_client = APNs(
+                client_cert=certfile,
+                use_sandbox=self.use_sandbox,
+                max_connection_attempts=0,
+                loop=loop,
+            )
 
             self._report_certificate_expiration(certfile)
         else:
+            # max_connection_attempts is actually the maximum number of
+            # additional connection attempts, so =0 means try once only
+            # (we will retry at a higher level so not worth doing more here)
             self.apns_client = APNs(
                 key=self.get_config("keyfile"),
                 key_id=self.get_config("key_id"),
                 team_id=self.get_config("team_id"),
                 topic=self.get_config("topic"),
                 use_sandbox=self.use_sandbox,
+                max_connection_attempts=0,
+                loop=loop,
             )
 
         # without this, aioapns will retry every second forever.
@@ -170,8 +194,10 @@ class ApnsPushkin(Pushkin):
         log.info(f"Sending as APNs-ID {notif_id}")
         span.set_tag("apns_id", notif_id)
 
+        device_token = device.pushkey
+
         request = NotificationRequest(
-            device_token=device.pushkey,
+            device_token=device_token,
             message=shaved_payload,
             priority=prio,
             notification_id=notif_id,
@@ -211,24 +237,27 @@ class ApnsPushkin(Pushkin):
                         f"{response.status} {response.description}"
                     )
 
-    async def dispatch_notification(self, n, device, context):
+    async def _dispatch_notification_unlimited(self, n, device, context):
         log = NotificationLoggerAdapter(logger, {"request_id": context.request_id})
 
         # The pushkey is kind of secret because you can use it to send push
         # to someone.
         # span_tags = {"pushkey": device.pushkey}
-        span_tags = {}
+        span_tags: Dict[str, int] = {}
 
         with self.sygnal.tracer.start_span(
             "apns_dispatch", tags=span_tags, child_of=context.opentracing_span
         ) as span_parent:
 
-            payload = self._get_payload_full(n, log)
+            if n.event_id and not n.type:
+                payload = self._get_payload_event_id_only(n, device)
+            else:
+                payload = self._get_payload_full(n, device, log)
 
             if payload is None:
                 # Nothing to do
                 span_parent.log_kv({logs.EVENT: "apns_no_payload"})
-                return []
+                return
             prio = 10
             if n.prio == "low":
                 prio = 5
@@ -273,21 +302,54 @@ class ApnsPushkin(Pushkin):
                             retry_delay, twisted_reactor=self.sygnal.reactor
                         )
 
-    def _get_payload_full(self, n, log):
+    def _get_payload_event_id_only(self, n, device):
+        """
+        Constructs a payload for a notification where we know only the event ID.
+        Args:
+            n: The notification to construct a payload for.
+            device (Device): Device information to which the constructed payload
+            will be sent.
+
+        Returns:
+            The APNs payload as a nested dicts.
+        """
+        payload = {}
+
+        if device.data:
+            payload.update(device.data.get("default_payload", {}))
+
+        if n.room_id:
+            payload["room_id"] = n.room_id
+        if n.event_id:
+            payload["event_id"] = n.event_id
+
+        if n.counts.unread is not None:
+            payload["unread_count"] = n.counts.unread
+        if n.counts.missed_calls is not None:
+            payload["missed_calls"] = n.counts.missed_calls
+
+        return payload
+
+    def _get_payload_full(self, n, device, log):
         """
         Constructs a payload for a notification.
         Args:
             n: The notification to construct a payload for.
+            device (Device): Device information to which the constructed payload
+            will be sent.
             log: A logger.
 
         Returns:
             The APNs payload as nested dicts.
         """
+        from_display = n.sender
+        if n.sender_display_name is not None:
+            from_display = n.sender_display_name
+        from_display = from_display[0 : self.MAX_FIELD_LENGTH]
 
         loc_key = None
         loc_args = None
 
-        aps = {}
         payload = {}
 
         if n.request and n.request.startswith('ServiceRequest'):
@@ -314,21 +376,28 @@ class ApnsPushkin(Pushkin):
             log.info("Nothing to do for alert of type %s", n.type)
             return None
 
-        if loc_key:
-            aps["alert"] = {"loc-key": loc_key}
-            aps["mutable-content"] = 1
-
-        if loc_args:
-            aps["alert"]["loc-args"] = loc_args
-
         if loc_key and n.patient:
             payload["patient"] = n.patient
         if loc_key and n.sender:
             payload["sender"] = n.sender
 
-        payload["sound"] = "default"
 
-        payload["aps"] = aps
+        if n.type and device.data:
+            payload = copy.deepcopy(device.data.get("default_payload", {}))
+
+        payload.setdefault("aps", {})
+
+        if loc_key:
+            payload["aps"].setdefault("alert", {})["loc-key"] = loc_key
+
+        if loc_args:
+            payload["aps"].setdefault("alert", {})["loc-args"] = loc_args
+
+
+        if loc_key and n.room_id:
+            payload["room_id"] = n.room_id
+        if loc_key and n.event_id:
+            payload["event_id"] = n.event_id
 
         return payload
 

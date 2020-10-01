@@ -65,10 +65,39 @@ gcm
   to contain the 'Server key', which can be acquired from Firebase Console at:
   ``https://console.firebase.google.com/project/<PROJECT NAME>/settings/cloudmessaging/``
 
+Using an HTTP Proxy for outbound traffic
+----------------------------------------
+
+Sygnal will, by default, automatically detect an ``HTTPS_PROXY``
+environment variable on start-up.
+
+If one is present, it will be used for outbound traffic to APNs and GCM/FCM.
+
+Currently only HTTP proxies with the CONNECT method are supported.
+(Both APNs and FCM use HTTPS traffic which is tunnelled in a CONNECT tunnel.)
+
+If you wish, you can instead configure a HTTP CONNECT proxy in ``sygnal.yaml``.
+
+Pusher ``data`` configuration
+=============================
+
+The following parameters can be specified in the `data` dictionary which is given when configuring the pusher
+via `POST /_matrix/client/r0/pushers/set <https://matrix.org/docs/spec/client_server/latest#post-matrix-client-r0-pushers-set>`_ :
+
+* ``default_payload``: a dictionary which defines the basic payload to be sent to the notification service.
+  Sygnal will merge information specific to the push event into this dictionary. If unset, the empty dictionary is used.
+
+  This can be useful for clients to specify default push payload content. For instance, iOS clients will have
+  freedom to use silent/mutable notifications and be able to set some default alert/sound/badge fields.
+
 Running
 =======
 
-``python -m sygnal.sygnal``
+With default configuration file name of ``sygnal.yaml``:
+    ``python -m sygnal.sygnal``
+
+With custom configuration file name:
+    ``SYGNAL_CONF=/path/to/custom_sygnal.conf python -m sygnal.sygnal``
 
 Python 3.7 or higher is required.
 
