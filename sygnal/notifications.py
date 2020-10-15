@@ -84,6 +84,7 @@ class Notification:
         self.sender: Optional[str] = notif.get("sender")
         self.patient: Optional[str] = notif.get("patient")
         self.request: Optional[str] = notif.get("request")
+        self.background: Optional[bool] = notif.get("background")
 
         if "devices" not in notif or not isinstance(notif["devices"], list):
             raise InvalidNotificationException("Expected list in 'devices' key")

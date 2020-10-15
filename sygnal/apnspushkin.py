@@ -357,13 +357,13 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
             if n.type == "create":
                 loc_key = "CASE_CREATED"
             if loc_key and n.request:
-                payload["aps"]["triggeredBy"] = n.request
+                payload["triggeredBy"] = n.request
 
         if n.request and n.request.startswith('Communication'):
-            if n.type == "create" or n.type == "update":
+            if n.type == "update":
                 loc_key = "CASE_UPDATED"
             if loc_key and n.request:
-                payload["aps"]["triggeredBy"] = n.request
+                payload["triggeredBy"] = n.request
 
         if n.request and n.request.startswith('CommunicationRequest'):
             if n.type == "create":
@@ -371,30 +371,29 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
             if n.type == "update":
                 loc_key = "CALL_UPDATED"
             if loc_key and n.request:
-                payload["aps"]["triggeredBy"] = n.request
+                payload["triggeredBy"] = n.request
 
         if loc_key is None:
             log.info("Nothing to do for alert of type %s", n.type)
             return None
 
         if loc_key and n.patient:
-            payload["aps"]["patient"] = n.patient
+            payload["patient"] = n.patient
         if loc_key and n.sender:
-            payload["aps"]["sender"] = n.sender
+            payload["sender"] = n.sender
 
-        payload["aps"]["mutable-content"] = 1
-        payload["aps"]["sound"] = "default"
+        if n.background:
+            payload["aps"]["content-available"] = 1
+        else:
+            payload["aps"]["mutable-content"] = 1
+            payload["aps"]["sound"] = "default"
 
         if n.type and device.data:
             payload = copy.deepcopy(device.data.get("default_payload", {}))
 
 
         if loc_key:
-            payload["aps"].setdefault("alert", {})["loc-key"] = loc_key
-
-        if loc_args:
-            payload["aps"].setdefault("alert", {})["loc-args"] = loc_args
-
+            payload["type"] = loc_key
 
         if loc_key and n.room_id:
             payload["room_id"] = n.room_id
