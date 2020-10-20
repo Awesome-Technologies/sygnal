@@ -24,7 +24,7 @@ from typing import Dict
 from uuid import uuid4
 
 import aioapns
-from aioapns import APNs, NotificationRequest
+from aioapns import APNs, NotificationRequest, PushType
 from cryptography.hazmat.backends import default_backend
 from cryptography.x509 import load_pem_x509_certificate
 from opentracing import logs, tags
@@ -180,7 +180,7 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
             cert.not_valid_after.replace(tzinfo=timezone.utc).timestamp()
         )
 
-    async def _dispatch_request(self, log, span, device, shaved_payload, prio):
+    async def _dispatch_request(self, log, span, device, shaved_payload, prio, push_type):
         """
         Actually attempts to dispatch the notification once.
         """
@@ -201,6 +201,7 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
             message=shaved_payload,
             priority=prio,
             notification_id=notif_id,
+            push_type=push_type,
         )
 
         try:
@@ -244,6 +245,7 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
         # to someone.
         # span_tags = {"pushkey": device.pushkey}
         span_tags: Dict[str, int] = {}
+        push_type = None
 
         with self.sygnal.tracer.start_span(
             "apns_dispatch", tags=span_tags, child_of=context.opentracing_span
@@ -253,6 +255,8 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
                 payload = self._get_payload_event_id_only(n, device)
             else:
                 payload = self._get_payload_full(n, device, log)
+                if n.background:
+                    push_type = PushType.BACKGROUND
 
             if payload is None:
                 # Nothing to do
@@ -276,7 +280,7 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
                         "apns_dispatch_try", tags=span_tags, child_of=span_parent
                     ) as span:
                         return await self._dispatch_request(
-                            log, span, device, shaved_payload, prio
+                            log, span, device, shaved_payload, prio, push_type
                         )
                 except TemporaryNotificationDispatchException as exc:
                     retry_delay = self.RETRY_DELAY_BASE * (2 ** retry_number)
