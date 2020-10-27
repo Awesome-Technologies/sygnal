@@ -389,18 +389,15 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
         if n.background:
             payload["aps"]["content-available"] = 1
         else:
-            alert = {'title': "Titel"}
             if loc_key == "CASE_CREATED":
-                alert["title"] = "Neuer Fall erstellt"
+                payload["aps"]["alert"] = {'title': "Neuer Fall erstellt"}
             if loc_key == "CASE_UPDATED":
-                alert["title"] = "Fall aktualisiert"
-            payload["aps"]["alert"] = alert
+                payload["aps"]["alert"] = {'title': "Fall aktualisiert"}
             payload["aps"]["mutable-content"] = 1
             payload["aps"]["sound"] = "default"
 
         if n.type and device.data:
             payload = copy.deepcopy(device.data.get("default_payload", {}))
-
 
         if loc_key:
             payload["type"] = loc_key
