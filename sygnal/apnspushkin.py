@@ -72,6 +72,8 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
     # Errors for which the token should be rejected
     TOKEN_ERROR_REASON = "Unregistered"
     TOKEN_ERROR_CODE = 410
+    BAD_TOKEN_ERROR_REASON = "BadDeviceToken"
+    BAD_TOKEN_ERROR_CODE = 400
 
     MAX_TRIES = 3
     RETRY_DELAY_BASE = 10
@@ -226,6 +228,8 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
             if (
                 code == self.TOKEN_ERROR_CODE
                 or response.description == self.TOKEN_ERROR_REASON
+                or code == self.BAD_TOKEN_ERROR_CODE
+                or response.description == self.BAD_TOKEN_ERROR_REASON
             ):
                 return [device.pushkey]
             else:
