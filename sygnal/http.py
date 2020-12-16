@@ -262,6 +262,7 @@ class V1NotifyHandler(Resource):
 
                 rejected += result
 
+            request.responseHeaders.addRawHeader(b"Content-Type", b"application/json")
             request.write(json.dumps({"rejected": rejected}).encode())
 
             if rejected:
