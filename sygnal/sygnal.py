@@ -33,7 +33,7 @@ from twisted.python.failure import Failure
 
 from sygnal.http import PushGatewayApiServer
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(None)
 
 CONFIG_DEFAULTS: dict = {
     "http": {"port": 5000, "bind_addresses": ["127.0.0.1"]},
@@ -65,6 +65,9 @@ class Sygnal(object):
             custom_reactor: a Twisted Reactor to use.
             tracer (optional): an OpenTracing tracer. The default is the no-op tracer.
         """
+
+        global logger
+
         self.config = config
         self.reactor = custom_reactor
         self.pushkins = {}
@@ -72,6 +75,8 @@ class Sygnal(object):
 
         logging_dict_config = config["log"]["setup"]
         logging.config.dictConfig(logging_dict_config)
+
+        logger = logging.getLogger(__name__)
 
         logger.debug("Started logging")
 

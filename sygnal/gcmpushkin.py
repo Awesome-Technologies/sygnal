@@ -60,7 +60,7 @@ RESPONSE_STATUS_CODES_COUNTER = Counter(
     labelnames=["pushkin", "code"],
 )
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(None)
 
 GCM_URL = b"https://fcm.googleapis.com/fcm/send"
 MAX_TRIES = 3
@@ -100,6 +100,9 @@ class GcmPushkin(ConcurrencyLimitedPushkin):
     } | ConcurrencyLimitedPushkin.UNDERSTOOD_CONFIG_FIELDS
 
     def __init__(self, name, sygnal, config, canonical_reg_id_store):
+        global logger
+        logger = logging.getLogger(__name__)
+
         super(GcmPushkin, self).__init__(name, sygnal, config)
 
         nonunderstood = set(self.cfg.keys()).difference(self.UNDERSTOOD_CONFIG_FIELDS)

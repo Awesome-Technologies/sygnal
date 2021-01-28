@@ -40,7 +40,7 @@ from sygnal.utils import NotificationLoggerAdapter
 from .exceptions import InvalidNotificationException, NotificationDispatchException
 from .notifications import Notification
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(None)
 
 NOTIFS_RECEIVED_COUNTER = Counter(
     "sygnal_notifications_received", "Number of notification pokes received"
@@ -273,7 +273,7 @@ class V1NotifyHandler(Resource):
         except NotificationDispatchException:
             request.setResponseCode(502)
             log.warning("Failed to dispatch notification.", exc_info=True)
-        except Exception:
+        except Exception as e:
             request.setResponseCode(500)
             log.error("Exception whilst dispatching notification.", exc_info=True)
         finally:
@@ -328,6 +328,9 @@ class PushGatewayApiServer(object):
         Args:
             sygnal (Sygnal): the Sygnal object
         """
+        global logger
+        logger = logging.getLogger(__name__)
+
         root = Resource()
         matrix = Resource()
         push = Resource()

@@ -41,7 +41,7 @@ from sygnal.helper.proxy.proxy_asyncio import ProxyingEventLoopWrapper
 from sygnal.notifications import ConcurrencyLimitedPushkin
 from sygnal.utils import NotificationLoggerAdapter, twisted_sleep
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(None)
 
 SEND_TIME_HISTOGRAM = Histogram(
     "sygnal_apns_request_time", "Time taken to send HTTP request to APNS"
@@ -93,6 +93,9 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
 
     def __init__(self, name, sygnal, config):
         super().__init__(name, sygnal, config)
+
+        global logger
+        logger = logging.getLogger(__name__)
 
         nonunderstood = set(self.cfg.keys()).difference(self.UNDERSTOOD_CONFIG_FIELDS)
         if len(nonunderstood) > 0:
