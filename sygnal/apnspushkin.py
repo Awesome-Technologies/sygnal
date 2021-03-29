@@ -381,6 +381,12 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
             if loc_key and n.request:
                 payload["triggeredBy"] = n.request
 
+        # override key if provided by the push request
+        if n.push_type:
+            loc_key = n.push_type
+            if n.request:
+                payload["triggeredBy"] = n.request
+
         if loc_key is None:
             log.info("Nothing to do for alert of type %s", n.type)
             return None
