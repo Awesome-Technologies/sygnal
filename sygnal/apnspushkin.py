@@ -395,6 +395,7 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
         if n.background:
             payload["aps"]["content-available"] = 1
         else:
+            payload["aps"]["alert"] = {'title': loc_key}
             if loc_key == "CASE_CREATED":
                 payload["aps"]["alert"] = {'title': "Neuer Fall erstellt"}
             if loc_key == "CASE_UPDATED":
