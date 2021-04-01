@@ -350,10 +350,6 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
         Returns:
             The APNs payload as nested dicts.
         """
-        from_display = n.sender
-        if n.sender_display_name is not None:
-            from_display = n.sender_display_name
-        from_display = from_display[0 : self.MAX_FIELD_LENGTH]
 
         loc_key = None
         loc_args = None
