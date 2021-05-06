@@ -33,7 +33,8 @@ setup(
     name="matrix-sygnal",
     packages=find_packages(exclude=["tests", "tests.*"]),
     description="Reference Push Gateway for Matrix Notifications",
-    use_scm_version=False,
+    use_scm_version=True,
+    python_requires=">=3.7",
     setup_requires=["setuptools_scm"],
     install_requires=[
         "Twisted>=19.2.1",
@@ -49,6 +50,19 @@ setup(
         "idna>=2.8",
         "psycopg2>=2.8.4",
         "importlib_metadata",
+        "pywebpush>=1.13.0",
+        "py-vapid>=1.7.0",
     ],
+    extras_require={
+        "dev": [
+            "coverage~=5.5",
+            "black==20.8b1",
+            "flake8==3.9.0",
+            "isort~=5.0",
+            "mypy==0.812",
+            "mypy-zope==0.3.0",
+            "tox",
+        ]
+    },
     long_description=read("README.rst"),
 )

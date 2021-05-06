@@ -18,7 +18,6 @@ import json
 import logging
 import time
 from io import BytesIO
-from json import JSONDecodeError
 
 from opentracing import logs, tags
 from prometheus_client import Counter, Gauge, Histogram
@@ -33,7 +32,7 @@ from sygnal.exceptions import (
 )
 from sygnal.helper.context_factory import ClientTLSOptionsFactory
 from sygnal.helper.proxy.proxyagent_twisted import ProxyAgent
-from sygnal.utils import NotificationLoggerAdapter, twisted_sleep
+from sygnal.utils import NotificationLoggerAdapter, json_decoder, twisted_sleep
 
 from .exceptions import PushkinSetupException
 from .notifications import ConcurrencyLimitedPushkin
@@ -97,6 +96,7 @@ class GcmPushkin(ConcurrencyLimitedPushkin):
         "type",
         "api_key",
         "fcm_options",
+        "max_connections",
     } | ConcurrencyLimitedPushkin.UNDERSTOOD_CONFIG_FIELDS
 
     def __init__(self, name, sygnal, config, canonical_reg_id_store):
@@ -158,8 +158,10 @@ class GcmPushkin(ConcurrencyLimitedPushkin):
             an instance of this Pushkin
         """
         logger.debug("About to set up CanonicalRegId Store")
-        canonical_reg_id_store = CanonicalRegIdStore()
-        await canonical_reg_id_store.setup(sygnal.database, sygnal.database_engine)
+        canonical_reg_id_store = CanonicalRegIdStore(
+            sygnal.database, sygnal.database_engine
+        )
+        await canonical_reg_id_store.setup()
         logger.debug("Finished setting up CanonicalRegId Store")
 
         return cls(name, sygnal, config, canonical_reg_id_store)
@@ -251,8 +253,8 @@ class GcmPushkin(ConcurrencyLimitedPushkin):
             return pushkeys, []
         elif 200 <= response.code < 300:
             try:
-                resp_object = json.loads(response_text)
-            except JSONDecodeError:
+                resp_object = json_decoder.decode(response_text)
+            except ValueError:
                 raise NotificationDispatchException("Invalid JSON response from GCM.")
             if "results" not in resp_object:
                 log.error(
@@ -470,26 +472,23 @@ class CanonicalRegIdStore(object):
         );
         """
 
-    def __init__(self):
-        self.db: ConnectionPool = None
-        self.engine = None
+    def __init__(self, db: ConnectionPool, engine: str):
+        """
+        Args:
+            db (adbapi.ConnectionPool): database to prepare
+            engine (str):
+                Database engine to use. Shoud be either "sqlite" or "postgresql".
+        """
+        self.db = db
+        self.engine = engine
 
-    async def setup(self, db, engine):
+    async def setup(self):
         """
         Prepares, if necessary, the database for storing canonical registration IDs.
 
         Separate method from the constructor because we wait for an async request
         to complete, so it must be an `async def` method.
-
-        Args:
-            db (adbapi.ConnectionPool): database to prepare
-            engine (str):
-                Database engine to use. Shoud be either "sqlite" or "postgresql".
-
         """
-        self.db = db
-        self.engine = engine
-
         await self.db.runOperation(self.TABLE_CREATE_QUERY)
 
     async def set_canonical_id(self, reg_id, canonical_reg_id):
