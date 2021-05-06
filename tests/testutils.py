@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright 2019 The Matrix.org Foundation C.I.C.
+# Copyright 2019-2020 The Matrix.org Foundation C.I.C.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,17 +17,20 @@ from io import BytesIO
 from os import environ
 from threading import Condition
 from time import time_ns
-from typing import BinaryIO, List, Optional, Union
+from typing import BinaryIO, Dict, List, Optional, Union
 
 import attr
 import psycopg2
-from twisted.internet.defer import ensureDeferred
-from twisted.test.proto_helpers import MemoryReactorClock
+from twisted.internet._resolver import SimpleResolverComplexifier
+from twisted.internet.defer import ensureDeferred, fail, succeed
+from twisted.internet.error import DNSLookupError
+from twisted.internet.interfaces import IReactorPluggableNameResolver, IResolverSimple
+from twisted.internet.testing import MemoryReactorClock
 from twisted.trial import unittest
 from twisted.web.http_headers import Headers
 from twisted.web.server import Request
+from zope.interface.declarations import implementer
 
-from sygnal.http import PushGatewayApiServer
 from sygnal.sygnal import CONFIG_DEFAULTS, Sygnal, merge_left_with_defaults
 
 REQ_PATH = b"/_matrix/push/v1/notify"
@@ -88,6 +91,7 @@ class TestCase(unittest.TestCase):
 
         logging_config = {
             "setup": {
+                "disable_existing_loggers": False,  # otherwise this breaks logging!
                 "formatters": {
                     "normal": {
                         "format": "%(asctime)s [%(process)d] "
@@ -123,17 +127,21 @@ class TestCase(unittest.TestCase):
             self._set_up_database(self.dbname)
 
         self.sygnal = Sygnal(config, reactor)
+        self.reactor = reactor
         self.sygnal.database.start()
-        self.v1api = PushGatewayApiServer(self.sygnal)
 
-        start_deferred = ensureDeferred(
-            self.sygnal._make_pushkins_then_start(0, [], None)
-        )
+        start_deferred = ensureDeferred(self.sygnal.make_pushkins_then_start())
 
         while not start_deferred.called:
             # we need to advance until the pushkins have started up
             self.sygnal.reactor.advance(1)
             self.sygnal.reactor.wait_for_work(lambda: start_deferred.called)
+
+        # sygnal should have started a single (fake) tcp listener
+        listeners = self.reactor.tcpServers
+        self.assertEqual(len(listeners), 1)
+        (port, site, _backlog, interface) = listeners[0]
+        self.site = site
 
     def tearDown(self):
         super().tearDown()
@@ -199,7 +207,7 @@ class TestCase(unittest.TestCase):
             payload = json.dumps(payload)
         content = BytesIO(payload.encode())
 
-        channel = FakeChannel(self.v1api.site, self.sygnal.reactor)
+        channel = FakeChannel(self.site, self.sygnal.reactor)
         channel.process_request(b"POST", REQ_PATH, content)
 
         while not channel.done:
@@ -239,13 +247,13 @@ class TestCase(unittest.TestCase):
 
         contents = [BytesIO(dump_if_needed(payload).encode()) for payload in payloads]
 
-        channels = [FakeChannel(self.v1api.site, self.sygnal.reactor) for _ in contents]
+        channels = [FakeChannel(self.site, self.sygnal.reactor) for _ in contents]
 
         for channel, content in zip(channels, contents):
             channel.process_request(b"POST", REQ_PATH, content)
 
         def all_channels_done():
-            return all([channel.done for channel in channels])
+            return all(channel.done for channel in channels)
 
         while not all_channels_done():
             # we need to advance until the request has been finished
@@ -261,10 +269,27 @@ class TestCase(unittest.TestCase):
         return [channel_result(channel) for channel in channels]
 
 
+@implementer(IReactorPluggableNameResolver)
 class ExtendedMemoryReactorClock(MemoryReactorClock):
     def __init__(self):
         super().__init__()
         self.work_notifier = Condition()
+
+        self.lookups: Dict[str, str] = {}
+
+        @implementer(IResolverSimple)
+        class FakeResolver(object):
+            @staticmethod
+            def getHostByName(name, timeout=None):
+                if name not in self.lookups:
+                    return fail(DNSLookupError("OH NO: unknown %s" % (name,)))
+                return succeed(self.lookups[name])
+
+        self.nameResolver = SimpleResolverComplexifier(FakeResolver())
+
+    def installNameResolver(self, resolver):
+        # It is not expected that this gets called.
+        raise RuntimeError(resolver)
 
     def callFromThread(self, function, *args):
         self.callLater(0, function, *args)

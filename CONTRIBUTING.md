@@ -1,13 +1,62 @@
 # Contributing code to Sygnal
 
-Everyone is welcome to contribute code to [matrix.org
-projects](https://github.com/matrix-org), provided that they are willing to
-license their contributions under the same license as the project itself. We
-follow a simple 'inbound=outbound' model for contributions: the act of
-submitting an 'inbound' contribution means that the contributor agrees to
-license the code under the same terms as the project's overall 'outbound'
-license - in our case, this is almost always Apache Software License v2 (see
-[LICENSE](LICENSE)).
+Everyone is welcome to contribute code to Sygnal, provided you are willing to
+license your contributions under the same license as the project itself. In
+this case, the [Apache Software License v2](LICENSE).
+
+## Preparing your development environment
+
+### Create a virtualenv
+
+To contribute to Sygnal, ensure you have Python 3.7 or newer and then run:
+
+```bash
+python3 -m venv venv
+./venv/bin/pip install -e '.[dev]'
+```
+
+This creates an isolated virtual Python environment ("virtualenv") just for
+use with Sygnal, then installs Sygnal along with its dependencies, and lastly
+installs a handful of useful tools
+
+If you get `ConnectTimeoutError`, this is caused by slow internet whereby 
+`pip` has a default time out of _15 sec_. You can specify a larger timeout 
+by passing `--timeout 120` to the `pip install` command above.
+
+Finally, activate the virtualenv by running:
+
+```bash
+source ./venv/bin/activate
+```
+
+Be sure to do this _every time_ you open a new terminal window for working on
+Sygnal. Activating the venv ensures that any Python commands you run (`pip`,
+`python`, etc.) use the versions inside your venv, and not your system Python.
+
+When you're done, you can close your terminal or run `deactivate` to disable
+the virtualenv.
+
+### Run the tests
+
+To make sure everything is working as expected, run the unit tests:
+
+```bash
+tox -e py
+```
+
+If you see a message like:
+
+```
+-------------------------------------------------------------------------------
+Ran 46 tests in 0.209s
+
+PASSED (successes=46)
+___________________________________ summary ___________________________________
+  py: commands succeeded
+  congratulations :)
+```
+
+Then all is well and you're ready to work!
 
 ## How to contribute
 
@@ -42,27 +91,23 @@ Sygnal follows the [Synapse code style].
 Many of the conventions are enforced by scripts which are run as part of the
 [continuous integration system](#continuous-integration-and-testing).
 
-To help check and fix adherence to the code style, you can run `scripts-dev/lint.sh`
-locally. You'll need Python 3.7 or later, and to install a number of tools:
+To help check and fix adherence to the code style, you can run `tox`
+locally. You'll need Python 3.7 or later, and a virtual environment configured and
+active:
 
+```bash
+# Activate the virtual environment
+source ./venv/bin/activate
+
+# Run the code style check
+tox -e check_codestyle
+
+# Run the types check
+tox -e check_types
 ```
-# Install the dependencies
-pip install -U black flake8 isort mypy mypy-zope
 
-# Run the linter script
-./scripts-dev/lint.sh
-```
-
-**Note that the script does not just test/check, but also reformats code, so you
-may wish to ensure any new code is committed first**.
-
-By default, this script checks all files and can take some time; if you alter
-only certain files, you might wish to specify paths as arguments to reduce the
-run-time:
-
-```
-./scripts-dev/lint.sh path/to/file1.py path/to/file2.py path/to/folder
-```
+These commands will consider the paths and files related to the project (i.e.
+everything in `sygnal/` and in `tests/` as well as the `setup.py` file).
 
 Before pushing new changes, ensure they don't produce linting errors. Commit any
 files that were corrected.

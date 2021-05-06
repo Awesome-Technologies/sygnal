@@ -4,10 +4,15 @@ var/
 sygnal.pid
 sygnal.db
 _trial_temp*
+.coverage*
 
+/venv/
+/.venv/
 /.idea
 /.eggs
 /*.egg-info
 /build
 /dist
 /.tox
+/.python-version
+/htmlcov
