@@ -33,7 +33,7 @@ setup(
     name="matrix-sygnal",
     packages=find_packages(exclude=["tests", "tests.*"]),
     description="Reference Push Gateway for Matrix Notifications",
-    use_scm_version=True,
+    use_scm_version=False,
     python_requires=">=3.7",
     setup_requires=["setuptools_scm"],
     install_requires=[
