@@ -384,7 +384,7 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
 
         if loc_key is None:
             log.info("Nothing to do for alert of type %s", n.type)
-            return None
+            return {}
 
         if loc_key and n.patient:
             payload["patient"] = n.patient
